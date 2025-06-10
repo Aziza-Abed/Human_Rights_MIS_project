@@ -4,6 +4,7 @@ import requests
 from datetime import datetime, timezone
 import uuid
 import os
+from dotenv import load_dotenv
 import json
 import folium
 from streamlit_folium import st_folium
@@ -19,7 +20,13 @@ API_BASE = "http://localhost:8000"
 st.set_page_config(page_title="Human Rights MIS", layout="wide")
 st.title("\U0001f6e1️ Human Rights Monitor MIS")
 
-ACCESS_CODES = {"Lawyer": "LEGAL123", "Admin": "ADMIN123"}
+# Load variables from .env file
+load_dotenv()
+
+ACCESS_CODES = {
+    "Lawyer": os.getenv("LAWYER_CODE"),
+    "Admin": os.getenv("ADMIN_CODE"),
+}
 
 
 def generate_csv_download(data, filename="export.csv"):
