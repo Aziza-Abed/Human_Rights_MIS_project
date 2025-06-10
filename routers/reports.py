@@ -207,7 +207,7 @@ def report_timeline():
                 "_id": {
                     "$dateToString": {
                         "format": "%Y-%m-%d",
-                        "date": "$incident_details.date",
+                        "date": {"$toDate": "$incident_details.date"},
                     }
                 },
                 "count": {"$sum": 1},

@@ -93,7 +93,8 @@ def get_timeline_data(source: str = "reports", time_period: str = "month"):
 
     try:
         results = list(collection.aggregate(pipeline))
-        return results
+        return [{"date": r["_id"], "count": r["count"]} for r in results]
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
