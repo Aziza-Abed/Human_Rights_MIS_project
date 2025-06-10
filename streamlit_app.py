@@ -8,6 +8,11 @@ import json
 import folium
 from streamlit_folium import st_folium
 import plotly.express as px
+import io
+import base64
+import csv
+from fpdf import FPDF
+
 
 API_BASE = "http://localhost:8000"
 
@@ -15,6 +20,41 @@ st.set_page_config(page_title="Human Rights MIS", layout="wide")
 st.title("\U0001f6e1️ Human Rights Monitor MIS")
 
 ACCESS_CODES = {"Lawyer": "LEGAL123", "Admin": "ADMIN123"}
+
+
+def generate_csv_download(data, filename="export.csv"):
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=data[0].keys())
+    writer.writeheader()
+    writer.writerows(data)
+    csv_data = output.getvalue()
+    b64 = base64.b64encode(csv_data.encode()).decode()
+    href = (
+        f'<a href="data:file/csv;base64,{b64}" download="{filename}"> Download CSV</a>'
+    )
+    return href
+
+
+def generate_pdf_download(data, title="Report", filename="report.pdf"):
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", size=14)
+    pdf.cell(200, 10, txt=title, ln=True, align="C")
+    pdf.set_font("Arial", size=12)
+    pdf.ln(10)
+
+    for item in data:
+        for key, val in item.items():
+            pdf.multi_cell(0, 10, f"{key.title()}: {val}")
+        pdf.ln(5)
+
+    pdf_data = pdf.output(dest="S").encode("latin-1")
+    b64 = base64.b64encode(pdf_data).decode()
+
+    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}"> Download PDF</a>'
+    return href
+
 
 # Create media directory if it doesn't exist
 if not os.path.exists("media"):
@@ -33,7 +73,7 @@ if access_code_required:
 
     if access_code != ACCESS_CODES[role]:
         st.sidebar.error(
-            "❌ Invalid access code" if access_code else "Access code required"
+            " Invalid access code" if access_code else "Access code required"
         )
         st.stop()
     else:
@@ -62,13 +102,13 @@ if "\U0001f4c1 Case Management" in available_tabs:
         if role == "Admin":
             cm_tab = st.radio(
                 "Choose action:",
-                ["➕ Add Case", "📄 View Cases", "✏️ Edit Case", "🗑️ Delete Case"],
+                [" Add Case", " View Cases", " Edit Case", " Delete Case"],
                 horizontal=True,
             )
         else:
-            cm_tab = st.radio("Choose action:", ["📄 View Cases"])
+            cm_tab = st.radio("Choose action:", [" View Cases"])
 
-        if cm_tab == "➕ Add Case":
+        if cm_tab == " Add Case":
             with st.form("add_case_form", clear_on_submit=True):
                 case_id = f"HRM-{uuid.uuid4().hex[:6]}"
                 title = st.text_input("Case Title*", help="Required field")
@@ -98,7 +138,9 @@ if "\U0001f4c1 Case Management" in available_tabs:
                     "Status*",
                     ["new", "under_investigation", "resolved"],
                     help="Required field",
+                    key="status_add_case",
                 )
+
                 country = st.text_input("Country*", help="Required field")
                 region = st.text_input("Region/City")
                 lat = st.number_input("Latitude", value=31.9, format="%.6f")
@@ -129,7 +171,7 @@ if "\U0001f4c1 Case Management" in available_tabs:
                         os.makedirs("media/case_evidence", exist_ok=True)
 
                         for file in files:
-                            if file.size > 10 * 1024 * 1024:  # 10MB limit
+                            if file.size > 10 * 1024 * 1024:
                                 st.error(f"File {file.name} is too large (max 10MB)")
                                 continue
 
@@ -191,18 +233,20 @@ if "\U0001f4c1 Case Management" in available_tabs:
                         )
 
                         if res.ok:
-                            st.success("✅ Case created successfully!")
-                            st.balloons()
+                            st.success(" Case created successfully!")
                         else:
-                            st.error(f"❌ Error creating case: {res.text}")
+                            st.error(f" Error creating case: {res.text}")
 
-        elif cm_tab == "📄 View Cases":
-            st.subheader("🔍 Filter Cases")
+        elif cm_tab == " View Cases":
+            st.subheader(" Filter Cases")
             col1, col2, col3 = st.columns(3)
             with col1:
                 status_filter = st.selectbox(
-                    "Status", ["All"] + ["new", "under_investigation", "resolved"]
+                    "Status",
+                    ["All"] + ["new", "under_investigation", "resolved"],
+                    key="status_filter_cases",
                 )
+
             with col2:
                 country_filter = st.text_input("Country")
             with col3:
@@ -240,71 +284,92 @@ if "\U0001f4c1 Case Management" in available_tabs:
                     st.info("No cases found matching your criteria.")
                 else:
                     st.write(f"Found {len(cases)} cases")
-                    for case in cases:
-                        with st.expander(
-                            f"{case['case_id']} – {case['title']} ({case['status'].replace('_', ' ').title()})"
-                        ):
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(
-                                    "📅 **Violation Date:**",
-                                    case.get("date_occurred", "N/A")[:10],
+                    flat_cases = [
+                        {
+                            "Case ID": c["case_id"],
+                            "Title": c["title"],
+                            "Status": c["status"],
+                            "Country": c["location"].get("country", ""),
+                            "Region": c["location"].get("region", ""),
+                            "Priority": c.get("priority", ""),
+                            "Date Occurred": c.get("date_occurred", "")[:10],
+                            "Description": c.get("description", "")[:100],
+                        }
+                        for c in cases
+                    ]
+
+            st.markdown("### Export Cases")
+            st.markdown(
+                generate_csv_download(flat_cases, filename="cases.csv"),
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                generate_pdf_download(flat_cases, title="Cases", filename="cases.pdf"),
+                unsafe_allow_html=True,
+            )
+
+            for case in cases:
+                with st.expander(
+                    f"{case['case_id']} – {case['title']} ({case['status'].replace('_', ' ').title()})"
+                ):
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(
+                            " **Violation Date:**",
+                            case.get("date_occurred", "N/A")[:10],
+                        )
+                        st.write(
+                            " **Reported Date:**",
+                            case.get("date_reported", "N/A")[:10],
+                        )
+                        st.write(
+                            " **Violation Types:**",
+                            ", ".join(case.get("violation_types", [])),
+                        )
+                        st.write(
+                            " **Location:**",
+                            f"{case['location'].get('region', '')}, {case['location'].get('country', '')}",
+                        )
+                        st.write(
+                            " **Priority:**",
+                            case.get("priority", "N/A").title(),
+                        )
+                    with col2:
+                        st.write(" **Description:**")
+                        st.write(case.get("description", "No description provided"))
+
+                    coords = (
+                        case["location"]
+                        .get("coordinates", {})
+                        .get("coordinates", [0, 0])
+                    )
+                    if coords != [0, 0]:
+                        m = folium.Map(location=[coords[1], coords[0]], zoom_start=8)
+                        folium.Marker(
+                            [coords[1], coords[0]], tooltip=case["title"]
+                        ).add_to(m)
+                        st_folium(
+                            m,
+                            width=700,
+                            height=300,
+                            key=f"case_map_{case['case_id']}",
+                        )
+
+                    if case.get("evidence"):
+                        st.subheader(" Evidence")
+                        for ev in case["evidence"]:
+                            if ev["type"] == "image":
+                                st.image(
+                                    f"{API_BASE}{ev['url']}",
+                                    caption=ev["description"],
                                 )
-                                st.write(
-                                    "📅 **Reported Date:**",
-                                    case.get("date_reported", "N/A")[:10],
-                                )
-                                st.write(
-                                    "🏷️ **Violation Types:**",
-                                    ", ".join(case.get("violation_types", [])),
-                                )
-                                st.write(
-                                    "📍 **Location:**",
-                                    f"{case['location'].get('region', '')}, {case['location'].get('country', '')}",
-                                )
-                                st.write(
-                                    "🔢 **Priority:**",
-                                    case.get("priority", "N/A").title(),
-                                )
-                            with col2:
-                                st.write("📌 **Description:**")
-                                st.write(
-                                    case.get("description", "No description provided")
+                            else:
+                                st.markdown(
+                                    f"[📎 {ev['description']}]({API_BASE}{ev['url']})"
                                 )
 
-                            coords = (
-                                case["location"]
-                                .get("coordinates", {})
-                                .get("coordinates", [0, 0])
-                            )
-                            if coords != [0, 0]:
-                                m = folium.Map(
-                                    location=[coords[1], coords[0]], zoom_start=8
-                                )
-                                folium.Marker(
-                                    [coords[1], coords[0]], tooltip=case["title"]
-                                ).add_to(m)
-                                st_folium(
-                                    m,
-                                    width=700,
-                                    height=300,
-                                    key=f"case_map_{case['case_id']}",
-                                )
-
-                            if case.get("evidence"):
-                                st.subheader("📁 Evidence")
-                                for ev in case["evidence"]:
-                                    if ev["type"] == "image":
-                                        st.image(
-                                            f"{API_BASE}{ev['url']}",
-                                            caption=ev["description"],
-                                        )
-                                    else:
-                                        st.markdown(
-                                            f"[📎 {ev['description']}]({API_BASE}{ev['url']})"
-                                        )
-
-        elif cm_tab == "✏️ Edit Case" and role == "Admin":
+        elif cm_tab == " Edit Case" and role == "Admin":
             st.subheader("Edit Case Status")
             res = requests.get(f"{API_BASE}/cases/")
             if res.ok:
@@ -328,6 +393,7 @@ if "\U0001f4c1 Case Management" in available_tabs:
                     index=["new", "under_investigation", "resolved"].index(
                         current_status
                     ),
+                    key="status_edit_case",
                 )
 
                 if st.button("Update Case Status"):
@@ -335,14 +401,14 @@ if "\U0001f4c1 Case Management" in available_tabs:
                         f"{API_BASE}/cases/{case_id}", params={"status": new_status}
                     )
                     if res.ok:
-                        st.success("✅ Case status updated successfully!")
+                        st.success(" Case status updated successfully!")
                     else:
-                        st.error(f"❌ Error updating case: {res.text}")
+                        st.error(f" Error updating case: {res.text}")
 
-        elif cm_tab == "🗑️ Delete Case" and role == "Admin":
+        elif cm_tab == " Delete Case" and role == "Admin":
             st.subheader("Delete Case")
             st.warning(
-                "⚠️ This action cannot be undone. Deleted cases cannot be recovered."
+                " This action cannot be undone. Deleted cases cannot be recovered."
             )
             res = requests.get(f"{API_BASE}/cases/")
             if res.ok:
@@ -359,9 +425,9 @@ if "\U0001f4c1 Case Management" in available_tabs:
                 if st.button("Confirm Delete"):
                     res = requests.delete(f"{API_BASE}/cases/{case_id}")
                     if res.ok:
-                        st.success("✅ Case deleted successfully!")
+                        st.success(" Case deleted successfully!")
                     else:
-                        st.error(f"❌ Error deleting case: {res.text}")
+                        st.error(f" Error deleting case: {res.text}")
 
 
 if "\U0001f4cb Incident Reporting" in available_tabs:
@@ -370,18 +436,37 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
 
         if role == "Public":
             ir_tab = st.radio(
-                "Choose action:", ["📝 Submit Report", "📊 Analytics"], horizontal=True
+                "Choose action:", [" Submit Report", " Analytics"], horizontal=True
             )
         elif role == "NGO Worker":
-            ir_tab = st.radio("Choose action:", ["📝 Submit Report", "📃 View Reports"])
+            ir_tab = st.radio("Choose action:", [" Submit Report", " View Reports"])
         else:
             ir_tab = st.radio(
                 "Choose action:",
-                ["📝 Submit Report", "📃 View Reports", "📊 Analytics"],
+                [" Submit Report", " View Reports", " Analytics"],
                 horizontal=True,
             )
 
-        if ir_tab == "📝 Submit Report":
+        if ir_tab == " Submit Report":
+
+            anonymous = st.checkbox(
+                "Report Anonymously", value=True, key="anonymous_checkbox"
+            )
+
+            if not st.session_state.get("anonymous_checkbox", True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    email = st.text_input("Email", key="email_field")
+                with col2:
+                    phone = st.text_input("Phone", key="phone_field")
+                contact_method = st.selectbox(
+                    "Preferred Contact Method",
+                    ["email", "phone"],
+                    key="contact_method_field",
+                )
+            else:
+                email = phone = contact_method = None
+
             with st.form("report_form", clear_on_submit=True):
                 report_id = f"IR-{uuid.uuid4().hex[:6]}"
                 reporter_type = st.selectbox(
@@ -389,20 +474,6 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                     ["victim", "witness", "ngo_worker"],
                     help="Required field",
                 )
-                anonymous = st.checkbox("Report Anonymously", value=True)
-
-                # Collect contact info if not anonymous
-                if not anonymous:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        email = st.text_input("Email")
-                    with col2:
-                        phone = st.text_input("Phone")
-                    contact_method = st.selectbox(
-                        "Preferred Contact Method", ["email", "phone"]
-                    )
-                else:
-                    email, phone, contact_method = None, None, None
 
                 st.subheader("Incident Details")
                 col1, col2 = st.columns(2)
@@ -466,16 +537,18 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                             form_data = {
                                 "report_id": report_id,
                                 "reporter_type": reporter_type,
-                                "anonymous": str(anonymous).lower(),
+                                "anonymous": str(
+                                    st.session_state.get("anonymous_checkbox", True)
+                                ).lower(),
                                 "contact_info": (
                                     {
-                                        "email": email if not anonymous else None,
-                                        "phone": phone if not anonymous else None,
-                                        "preferred_contact": (
-                                            contact_method if not anonymous else None
-                                        ),
+                                        "email": email,
+                                        "phone": phone,
+                                        "preferred_contact": contact_method,
                                     }
-                                    if not anonymous
+                                    if not st.session_state.get(
+                                        "anonymous_checkbox", True
+                                    )
                                     else None
                                 ),
                                 "date": date.isoformat(),
@@ -489,7 +562,7 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                             # Prepare files for upload
                             files_to_upload = []
                             for file in files:
-                                if file.size > 10 * 1024 * 1024:  # 10MB limit
+                                if file.size > 10 * 1024 * 1024:
                                     st.error(
                                         f"File {file.name} is too large (max 10MB)"
                                     )
@@ -508,20 +581,22 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                                 files=files_to_upload,
                             )
                             if res.ok:
-                                st.success("✅ Report submitted successfully!")
-                                st.balloons()
+                                st.success(" Report submitted successfully!")
                             else:
-                                st.error(f"❌ Error submitting report: {res.text}")
+                                st.error(f" Error submitting report: {res.text}")
                         except Exception as e:
-                            st.error(f"❌ An error occurred: {str(e)}")
+                            st.error(f" An error occurred: {str(e)}")
 
-        elif ir_tab == "📃 View Reports":
-            st.subheader("🔍 Filter Reports")
+        elif ir_tab == " View Reports":
+            st.subheader(" Filter Reports")
             col1, col2, col3 = st.columns(3)
             with col1:
                 selected_status = st.selectbox(
-                    "Status", ["All"] + ["new", "under_investigation", "resolved"]
+                    "Status",
+                    ["All"] + ["new", "under_investigation", "resolved"],
+                    key="status_filter_ir",
                 )
+
             with col2:
                 selected_location = st.text_input("Location (Country or City)")
             with col3:
@@ -542,6 +617,39 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                     st.info("No reports found matching your criteria.")
                 else:
                     st.write(f"Found {len(reports)} reports")
+
+                    flat_reports = [
+                        {
+                            "Report ID": r["report_id"],
+                            "Status": r.get("status", ""),
+                            "Date": r["incident_details"].get("date", ""),
+                            "Country": r["incident_details"]["location"].get(
+                                "country", ""
+                            ),
+                            "City": r["incident_details"]["location"].get("city", ""),
+                            "Description": r["incident_details"].get("description", "")[
+                                :100
+                            ],
+                        }
+                        for r in reports
+                    ]
+
+                    st.markdown("### Export Reports")
+                    st.markdown(
+                        generate_csv_download(
+                            flat_reports, filename="incident_reports.csv"
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        generate_pdf_download(
+                            flat_reports,
+                            title="Incident Reports",
+                            filename="incident_reports.pdf",
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
                     for report in reports:
                         d = report["incident_details"]
                         with st.expander(
@@ -550,10 +658,10 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                             col1, col2 = st.columns(2)
                             with col1:
                                 st.write(
-                                    "📍 **Location:**",
+                                    " **Location:**",
                                     f"{d['location'].get('city', '')}, {d['location'].get('country', '')}",
                                 )
-                                st.write("📅 **Date:**", d.get("date", "N/A")[:10])
+                                st.write(" **Date:**", d.get("date", "N/A")[:10])
                                 st.write(
                                     "👤 **Reporter Type:**",
                                     report.get("reporter_type", "N/A")
@@ -562,21 +670,21 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                                 )
                             with col2:
                                 st.write(
-                                    "🏷️ **Violations:**",
+                                    " **Violations:**",
                                     ", ".join(d.get("violation_types", [])),
                                 )
                                 if not report.get("anonymous", True):
                                     contact_info = report.get("contact_info", {})
                                     st.write(
-                                        "📞 **Contact:**",
+                                        " **Contact:**",
                                         contact_info.get(
                                             "preferred_contact", "N/A"
                                         ).title(),
                                     )
                                     if contact_info and contact_info.get("email"):
-                                        st.write("📧 **Email:**", contact_info["email"])
+                                        st.write(" **Email:**", contact_info["email"])
                                     if contact_info and contact_info.get("phone"):
-                                        st.write("📱 **Phone:**", contact_info["phone"])
+                                        st.write(" **Phone:**", contact_info["phone"])
 
                             coords = (
                                 d.get("location", {})
@@ -597,11 +705,11 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                                     key=f"report_map_{report['report_id']}",
                                 )
 
-                            st.write("📝 **Full Description:**")
+                            st.write(" **Full Description:**")
                             st.write(d.get("description", "No description provided"))
 
                             if report.get("evidence"):
-                                st.subheader("📁 Evidence")
+                                st.subheader(" Evidence")
                                 for ev in report["evidence"]:
                                     if ev["type"] == "image":
                                         st.image(
@@ -610,11 +718,11 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
                                         )
                                     else:
                                         st.markdown(
-                                            f"[📎 {ev['description']}]({API_BASE}{ev['url']})"
+                                            f"[ {ev['description']}]({API_BASE}{ev['url']})"
                                         )
 
-        elif ir_tab == "📊 Analytics":
-            st.subheader("📈 Violation Types Distribution")
+        elif ir_tab == " Analytics":
+            st.subheader(" Violation Types Distribution")
             res = requests.get(f"{API_BASE}/reports/analytics")
             if res.ok and res.json():
                 df = pd.DataFrame(res.json())
@@ -635,7 +743,7 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
             else:
                 st.info("No violation data available yet.")
 
-            st.subheader("🕒 Timeline of Reports")
+            st.subheader(" Timeline of Reports")
             res2 = requests.get(f"{API_BASE}/reports/analytics/timeline")
             if res2.ok and res2.json():
                 timeline_df = pd.DataFrame(res2.json())
@@ -651,7 +759,7 @@ if "\U0001f4cb Incident Reporting" in available_tabs:
             else:
                 st.info("No timeline data available.")
 
-            st.subheader("🗺️ Incident Heatmap")
+            st.subheader(" Incident Heatmap")
             geo = requests.get(f"{API_BASE}/reports/analytics/geodata")
             if geo.ok and geo.json():
                 geo_df = pd.DataFrame(geo.json())

@@ -79,6 +79,7 @@ def get_timeline_data(source: str = "reports", time_period: str = "month"):
     date_format = format_map.get(time_period, "%Y-%m")
 
     pipeline = [
+        {"$match": {date_field: {"$exists": True, "$type": "date"}}},
         {
             "$group": {
                 "_id": {
@@ -88,7 +89,6 @@ def get_timeline_data(source: str = "reports", time_period: str = "month"):
             }
         },
         {"$sort": {"_id": 1}},
-        {"$project": {"date": "$_id", "count": 1, "_id": 0}},
     ]
 
     try:

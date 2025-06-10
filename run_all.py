@@ -19,7 +19,7 @@ if __name__ == "__main__":
     os.chdir(
         os.path.dirname(os.path.abspath(__file__))
     )  # ensure script runs from project root
-    print("🚀 Launching Human Rights MIS (FastAPI + Streamlit)...\n")
+    print("Launching Human Rights MIS ...\n")
 
     t1 = threading.Thread(target=run_fastapi)
     t2 = threading.Thread(target=run_streamlit)
